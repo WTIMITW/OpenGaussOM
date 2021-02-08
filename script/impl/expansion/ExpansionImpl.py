@@ -93,7 +93,9 @@ class ExpansionImpl():
         if envFile:
             self.envFile = envFile
         else:
-            self.envFile = "/etc/profile"
+            userpath = pwd.getpwnam(self.user).pw_dir
+            mpprcFile = os.path.join(userpath, ".bashrc")
+            self.envFile = mpprcFile
 
         currentTime = str(datetime.datetime.now()).replace(" ", "_").replace(
             ".", "_")
@@ -345,7 +347,9 @@ class ExpansionImpl():
         envfile = self.envFile
         tempXmlFile = "%s/clusterconfig.xml" % self.tempFileDir
 
-        if envfile == "/etc/profile":
+        userpath = pwd.getpwnam(self.user).pw_dir
+        mpprcFile = os.path.join(userpath, ".bashrc")
+        if envfile == mpprcFile:
             preinstallCmd = "{softpath}/script/gs_preinstall -U {user} -G {group} \
             -X {xmlfile} --non-interactive 2>&1\
                     ".format(softpath=self.context.packagepath,user=self.user,

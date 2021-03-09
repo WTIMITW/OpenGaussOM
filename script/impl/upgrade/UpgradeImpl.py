@@ -1067,7 +1067,7 @@ class UpgradeImpl:
                 self.upgradeAgain()
             except Exception as e:
                 errmsg = ErrorCode.GAUSS_529["GAUSS_52934"] + \
-                         "You can use -h to upgrade or manually rollback."
+                         "You can use --grey to upgrade or manually rollback."
                 self.context.logger.log(errmsg + str(e))
                 self.exitWithRetCode(self.context.action, False)
         else:
@@ -1076,7 +1076,7 @@ class UpgradeImpl:
 
     def upgradeAgain(self):
         try:
-            self.context.logger.log(
+            self.context.logger.debug(
                 "From this step, you can use -h to upgrade again if failed.")
             # we have guarantee specified nodes have same step,
             # so we only need to get one node step
@@ -1108,8 +1108,9 @@ class UpgradeImpl:
                 self.recordNodeStep(GreyUpgradeStep.STEP_UPDATE_POST_CATALOG)
 
         except Exception as e:
-            self.context.logger.log("Failed to upgrade, can use -h to "
-                                    "upgrade again. Error: %s" % str(e))
+            self.context.logger.log("Failed to upgrade, can use --grey to "
+                                    "upgrade again after rollback. Error: "
+                                    "%s" % str(e))
             self.context.logger.debug(traceback.format_exc())
             self.exitWithRetCode(self.context.action, False, str(e))
         self.context.logger.log(
@@ -1407,44 +1408,8 @@ class UpgradeImpl:
         # when number and node names is empty
         self.context.logger.debug("Choose the nodes to be upgraded.")
         self.setClusterDetailInfo()
-
-        if len(self.context.nodeNames) != 0 :
-            self.context.logger.log(
-                "Upgrade nodes %s." % self.context.nodeNames)
-            greyNodeNames = self.getUpgradedNodeNames()
-            checkH_nodes = \
-                [val for val in greyNodeNames if val in self.context.nodeNames]
-            if len(checkH_nodes) > 0:
-                raise Exception("The nodes %s have been upgraded" %
-                                checkH_nodes)
-        # confirm the nodesNum in checkParameter, 1 or specified by -g
-        elif self.context.upgrade_remain:
-            greyNodeNames = self.getUpgradedNodeNames()
-            otherNodeNames = [
-                i for i in self.context.clusterNodes if i not in greyNodeNames]
-            self.context.nodeNames = otherNodeNames
-            self.context.logger.debug(
-                "Upgrade remain nodes %s." % self.context.nodeNames)
-        # specify the node num, try to find matched combination
-        else:
-            nodeTotalNum = len(self.context.clusterNodes)
-            if len(self.context.clusterNodes) == 1:
-                self.context.nodeNames.append(
-                    self.context.clusterInfo.dbNodes[0].name)
-                self.context.logger.log(
-                    "Upgrade one node '%s'." % self.context.nodeNames[0])
-            # SinglePrimaryMultiStandbyCluster / MasterStandbyCluster with
-            #  more than 1 node
-            elif self.context.nodesNum == nodeTotalNum:
-                self.context.nodeNames = self.context.clusterNodes
-                self.context.logger.log("Upgrade all nodes.")
-            elif self.context.nodesNum > nodeTotalNum:
-                raise Exception(ErrorCode.GAUSS_529["GAUSS_52906"])
-            else:
-                self.context.nodeNames = self.findOneMatchedCombin(
-                    self.context.clusterNodes)
-                self.context.logger.log(
-                    "Upgrade nodes %s." % self.context.nodeNames)
+        self.context.nodeNames = self.context.clusterNodes
+        self.context.logger.log("Upgrade all nodes.")
 
     def getUpgradedNodeNames(self, step=GreyUpgradeStep.STEP_INIT_STATUS):
         """
@@ -1695,6 +1660,21 @@ class UpgradeImpl:
             # Normal and the database could be connected
             #    if not, exit.
             self.startCluster()
+
+            # uninstall kerberos if has already installed
+            pghost_path = DefaultValue.getEnvironmentParameterValue(
+                'PGHOST', self.context.user)
+            kerberosflagfile = "%s/kerberos_upgrade_flag" % pghost_path
+            if os.path.exists(kerberosflagfile):
+                self.stopCluster()
+                self.context.logger.log("Starting uninstall Kerberos.",
+                                        "addStep")
+                cmd = "source %s && " % self.context.userProfile
+                cmd += "%s -m uninstall -U %s" % (OMCommand.getLocalScript(
+                    "Local_Kerberos"), self.context.user)
+                self.context.sshTool.executeCommand(cmd, "")
+                self.context.logger.log("Successfully uninstall Kerberos.")
+                self.startCluster()
             if self.unSetClusterReadOnlyMode() != 0:
                 raise Exception("NOTICE: "
                                 + ErrorCode.GAUSS_529["GAUSS_52907"])
@@ -1902,8 +1882,42 @@ class UpgradeImpl:
                 self.stopCluster()
                 self.startCluster()
 
+            # install Kerberos
+            self.install_kerberos()
             self.context.logger.log("Commit binary upgrade succeeded.")
             self.exitWithRetCode(Const.ACTION_INPLACE_UPGRADE, True)
+
+    def install_kerberos(self):
+        """
+        install kerberos after upgrade
+        :return:NA
+        """
+        pghost_path = DefaultValue.getEnvironmentParameterValue(
+            'PGHOST', self.context.user)
+        kerberosflagfile = "%s/kerberos_upgrade_flag" % pghost_path
+        if os.path.exists(kerberosflagfile):
+            # install kerberos
+            cmd = "source %s &&" % self.context.userProfile
+            cmd += "gs_om -t stop && "
+            cmd += "%s -m install -U %s --krb-server" % (
+                OMCommand.getLocalScript("Local_Kerberos"),
+                self.context.user)
+            (status, output) = DefaultValue.retryGetstatusoutput(cmd, 3, 5)
+            if status != 0:
+                raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"] %
+                                "Command:%s. Error:\n%s" % (cmd, output))
+            cmd = "source %s && " % self.context.userProfile
+            cmd += "%s -m install -U %s --krb-client " % (
+            OMCommand.getLocalScript("Local_Kerberos"), self.context.user)
+            self.context.sshTool.executeCommand(
+                cmd, "", hostList=self.context.clusterNodes)
+            self.context.logger.log("Successfully install Kerberos.")
+            cmd = "source %s && gs_om -t start" % self.context.userProfile
+            (status, output) = subprocess.getstatusoutput(cmd)
+            if status != 0 and not self.context.ignoreInstance:
+                raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"] %
+                                "Command:%s. Error:\n%s" % (cmd, output))
+            os.remove(kerberosflagfile)
 
     def refresh_dynamic_config_file(self):
         """
@@ -3613,6 +3627,8 @@ class UpgradeImpl:
                                     ErrorCode.GAUSS_529["GAUSS_52907"])
                 self.cleanBinaryUpgradeBakFiles(True)
                 self.cleanInstallPath(Const.NEW)
+                # install kerberos
+                self.install_kerberos()
         except Exception as e:
             self.context.logger.error(str(e))
             self.context.logger.log("Rollback failed.")
@@ -4138,6 +4154,30 @@ class UpgradeImpl:
             else:
                 raise Exception(ErrorCode.GAUSS_500["GAUSS_50004"] % 't' +
                                 " Value: %s" % self.context.action)
+
+            # judgment has installed kerberos before action_inplace_upgrade
+            self.context.logger.debug(
+                "judgment has installed kerberos before action_inplace_upgrade")
+            xmlfile = os.path.join(os.path.dirname(self.context.userProfile),
+                                   DefaultValue.FI_KRB_XML)
+            if os.path.exists(xmlfile) and \
+                    self.context.action == Const.ACTION_AUTO_UPGRADE \
+                    and self.context.is_grey_upgrade:
+                raise Exception(ErrorCode.GAUSS_502["GAUSS_50200"] % "kerberos")
+            if os.path.exists(xmlfile) and self.context.is_inplace_upgrade:
+                pghost_path = DefaultValue.getEnvironmentParameterValue(
+                    'PGHOST', self.context.user)
+                destfile = "%s/krb5.conf" % os.path.dirname(
+                    self.context.userProfile)
+                kerberosflagfile = "%s/kerberos_upgrade_flag" % pghost_path
+                cmd = "cp -rf %s %s " % (destfile, kerberosflagfile)
+                (status, output) = DefaultValue.retryGetstatusoutput(cmd, 3, 5)
+                if status != 0:
+                    raise Exception(
+                        ErrorCode.GAUSS_502["GAUSS_50206"] % kerberosflagfile
+                        + " Error: \n%s" % output)
+                self.context.logger.debug(
+                    "Successful back up kerberos config file.")
         except Exception as e:
             self.context.logger.debug(traceback.format_exc())
             self.exitWithRetCode(self.context.action, False, str(e))
@@ -4450,6 +4490,11 @@ class UpgradeImpl:
             self.context.logger.log("Failed to check upgrade environment.",
                                     "constant")
             raise Exception(str(e))
+        if not self.context.forceRollback:
+            if self.context.oldClusterNumber >= \
+                    Const.ENABLE_STREAM_REPLICATION_VERSION:
+                self.check_gucval_is_inval_given(
+                    Const.ENABLE_STREAM_REPLICATION_NAME, Const.VALUE_ON)
         try:
             if self.context.action == Const.ACTION_INPLACE_UPGRADE:
                 self.context.logger.log(
@@ -4465,6 +4510,19 @@ class UpgradeImpl:
 
         self.context.logger.log(
             "Successfully checked upgrade environment.", "constant")
+
+    def check_gucval_is_inval_given(self, guc_name, val_list):
+        """
+        Checks whether a given parameter is a given value list in a
+        given instance list.
+        """
+        self.context.logger.debug("checks whether the parameter:{0} is "
+                                  "the value:{1}.".format(guc_name, val_list))
+        guc_str = "{0}:{1}".format(guc_name, ",".join(val_list))
+        self.checkParam(guc_str)
+        self.context.logger.debug("Success to check the parameter:{0} value "
+                                  "is in the value:{1}.".format(guc_name,
+                                                                val_list))
 
     def checkDifferentVersion(self):
         """
@@ -4509,12 +4567,32 @@ class UpgradeImpl:
         we can upgrade again
         :return:
         """
+        if self.context.is_grey_upgrade:
+            self.check_option_grey()
         if len(self.context.nodeNames) != 0:
             self.checkOptionH()
         elif self.context.upgrade_remain:
             self.checkOptionContinue()
         else:
             self.checkOptionG()
+
+    def check_option_grey(self):
+        """
+        if nodes have been upgraded, no need to use --grey to upgrade again
+        :return:
+        """
+        stepFile = os.path.join(
+            self.context.upgradeBackupPath, Const.GREY_UPGRADE_STEP_FILE)
+        if not os.path.isfile(stepFile):
+            self.context.logger.debug(
+                "File %s does not exists. No need to check." %
+                Const.GREY_UPGRADE_STEP_FILE)
+            return
+        grey_node_names = self.getUpgradedNodeNames()
+        if grey_node_names:
+            self.context.logger.log(
+                "All nodes have been upgrade, no need to upgrade again.")
+            self.exitWithRetCode(self.action, True)
 
     def checkOptionH(self):
         self.checkNodeNames()

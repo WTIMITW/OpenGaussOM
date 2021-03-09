@@ -1453,7 +1453,7 @@ class dbClusterInfo():
                             dnInst.azName)
                     if dnInst.localRole == "Primary":
                         outText = outText + (
-                                "static_connections        : %s\n\n" %
+                                "static_connections        : %s\n" %
                                 dnInst.staticConnections)
                         outText = outText + (
                               "HA_state                  : %s\n" %
@@ -1462,14 +1462,14 @@ class dbClusterInfo():
                               "instance_role             : %s\n" %
                             dnInst.localRole)
                     if dnInst.localRole == "Primary":
-                        outText = outText + "------------------------" \
+                        outText = outText + "\n------------------------" \
                                             "---------------" \
                                             "--------------------------------\n\n"
                         continue
                     for i_loop in syncInfo:
-                        if i_loop[11] == '':
-                            i_loop[11] = 'Unknown'
                         if i_loop[0] == dnInst.listenIps[0]:
+                            if i_loop[11] == '':
+                                i_loop[11] = 'Unknown'
                             outText = outText + (
                                       "HA_state                  : %s\n" %
                                       i_loop[1])
@@ -1507,11 +1507,10 @@ class dbClusterInfo():
                                 outText = outText + (
                                       "upstream_nodeIp           : %s\n" %
                                       i_loop[12])
-                            outText = outText + ("\n")
-                            outText = outText + "------------------------" \
-                                      "---------------" \
-                                      "--------------------------------\n\n"
                             break
+                    outText = outText + "\n------------------------" \
+                                        "---------------" \
+                                    "--------------------------------\n\n"
                 if nodeId != 0:
                     break
             else:
@@ -1861,7 +1860,6 @@ class dbClusterInfo():
                              "receiver_received_location, receiver_write_location," \
                              "receiver_flush_location, receiver_replay_location," \
                              "sync_percent, channel from pg_stat_get_wal_receiver();"
-                    cascadeOutput = ""
                     if dbNode.name != localHostName:
                         cmd = "[need_replace_quotes] gsql -m -d postgres -p " \
                               "%s -A -t -c \"%s\"" % \
@@ -1872,7 +1870,7 @@ class dbClusterInfo():
                                 "failed to connect") >= 0:
                             continue
                         else:
-                            output = cascadeOutput.split('\n')[1:-1]
+                            cascadeOutput = cascadeOutput.split('\n')[1:-1]
                     else:
                         cmd = "gsql -m -d postgres -p %s -A -t -c \"%s\"" % (
                             dnInst.port, subsql)
@@ -1962,9 +1960,7 @@ class dbClusterInfo():
             with open(fileName, "a") as fp:
                 fp.write(content)
                 fp.flush()
-
-        else:
-            sys.stdout.write(content)
+        sys.stdout.write(content)
 
     def __checkOsUser(self, user):
         """

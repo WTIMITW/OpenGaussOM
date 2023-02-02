@@ -39,6 +39,7 @@ DbInitParam = []
 DataGucParam = []
 cm_server_guc_param = []
 NODE_NAME = []
+BlockSize = []
 
 # Add parameter: the logic cluster name
 PARA_CHECK_LIST = ["-t", "-h", "-m", "--mode",
@@ -46,10 +47,10 @@ PARA_CHECK_LIST = ["-t", "-h", "-m", "--mode",
                    "-n", "-g",
                    "-N", "--time-out", "--alarm-component",
                    "--parallel-jobs", '--redis-mode', "--ring-num",
-                   "--virtual-ip",
+                   "--virtual-ip", "--block-size",
                    "--nodeName", "--name", "--failure-limit", "--skip-items",
                    "script_type=", "oldcluster_num=", "guc_string=", "setType="]
-PATH_CHEKC_LIST = ["-M", "-o", "-f", "-X", "-P", "-s", "-R", "-Q",
+PATH_CHECK_LIST = ["-M", "-o", "-f", "-X", "-P", "-s", "-R", "-Q",
                    "--position", "-B",
                    "--backupdir", "--sep-env-file", "-l", "--logpath",
                    "--backup-dir",
@@ -58,6 +59,7 @@ PATH_CHEKC_LIST = ["-M", "-o", "-f", "-X", "-P", "-s", "-R", "-Q",
 VALUE_CHECK_LIST = ["|", ";", "&", "$", "<", ">", "`", "\\", "'", "\"", "{",
                     "}", "(", ")",
                     "[", "]", "~", "*", "?", "!", "\n"]
+BLOCKSIZE_CHECK_LIST = ["1", "2", "4", "8", "16", "32"]
 
 # append ':' after short options if it required parameter
 # append '=' after long options if it required parameter
@@ -68,7 +70,7 @@ gs_preinstall = ["-?", "--help", "-V", "--version", "-U:", "-G:", "-L",
                  "-l:", "--non-interactive", "--delete-root-trust", "--unused-third-party"]
 gs_install = ["-?", "--help", "-V", "--version", "-X:", "-l:",
               "--gsinit-parameter=", "--dn-guc=", "--cms-guc=",
-              "--time-out=", "--alarm-component="]
+              "--time-out=", "--alarm-component=", "--block-size="]
 gs_uninstall = ["-?", "--help", "-V", "--version", "-l:", "-L",
                 "--delete-data"]
 gs_postuninstall = ["-?", "--help", "-V", "--version", "--delete-user",
@@ -435,6 +437,8 @@ class Parameter():
                 PARAMETER_VALUEDICT['mpprcFile'] = os.path.realpath(value)
             elif (key == "--gsinit-parameter"):
                 DbInitParam.append(value)
+            elif (key == "--block-size"):
+                BlockSize.append(value)
             elif (key == "--dn-guc"):
                 DataGucParam.append(value)
             elif key == "--cms-guc":
@@ -508,12 +512,29 @@ class Parameter():
                                            (para,
                                             value) + " Invaild value: %s." %
                                            role)
-            if PATH_CHEKC_LIST.__contains__(para):
+            if PATH_CHECK_LIST.__contains__(para):
                 if os.path.realpath(value).find(role) >= 0:
                     GaussLog.exitWithError(ErrorCode.GAUSS_500[
                                                "GAUSS_50011"] % \
                                            (para, value) +
                                            " Invaild value: %s." % role)
+        if para == "--block-size":
+            isFlag = False
+            for role in BLOCKSIZE_CHECK_LIST:
+                if value == role:
+                    isFlag = True
+            if (not isFlag):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500[
+                                               "GAUSS_50011"] % \
+                                           (para,value) + " Invaild value: %s." %
+                                           value)
+            currentPath = os.path.dirname(os.path.realpath(__file__))
+            filename = os.path.join(currentPath, '../../blockSize.txt')
+            if os.path.exists(filename) and os.path.isfile(filename):
+                os.remove(filename)
+            file = open(filename, "w")
+            file.write(value)
+            file.close()
 
     @staticmethod
     def check_parse(key, value):

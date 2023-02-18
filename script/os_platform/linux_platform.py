@@ -128,9 +128,18 @@ class LinuxPlatform(object):
 
     def package_file_path(self, prefix_str, packageVersion, distro, postfix_str):
         dir_name = os.path.dirname(os.path.realpath(__file__))
-        return os.path.join(dir_name, "./../../", "%s-%s-%s-%s.%s" % (
+        choose_packet = os.path.join(dir_name, "../blockSize.txt")
+        if os.path.exists(choose_packet):
+            packet_file = open(choose_packet,'r')
+            packet = packet_file.read()
+            packet_file.close()
+        else:
+            return os.path.join(dir_name, "./../../", "%s-%s-%s-%s.%s" % (
                                     prefix_str, packageVersion, distro,
                                     BIT_VERSION, postfix_str))
+        return os.path.join(dir_name, "./../../", "%s-%s-%s-%s-%s.%s" % (
+                                    prefix_str, packageVersion, distro,
+                                    BIT_VERSION, packet, postfix_str))
 
 
     def getPackageFile(self, packageVersion, productVersion, fileType="tarFile"):
